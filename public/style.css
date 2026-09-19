@@ -98,6 +98,16 @@ button.ghost:disabled {
   color: #9aa5b8;
 }
 
+.field-group-title {
+  flex-basis: 100%;
+  font-size: 13px;
+  font-weight: 600;
+  color: #16233b;
+  margin: 4px 0 -6px;
+  padding-top: 12px;
+  border-top: 1px dashed #d8dee9;
+}
+
 .hint {
   color: #8a94a6;
   font-size: 13px;
@@ -142,6 +152,58 @@ button.ghost:disabled {
 .summary .chip.creep-off {
   background: #f1f4f9;
   color: #8a94a6;
+}
+
+.summary .chip.check-ok {
+  background: #ebfbee;
+  color: #2b8a3e;
+}
+
+.summary .chip.check-fail {
+  background: #fff0f0;
+  color: #c92a2a;
+}
+
+.summary .chip.check-off {
+  background: #f1f4f9;
+  color: #8a94a6;
+}
+
+.slot-check {
+  margin-top: 3px;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.slot-check.fit {
+  color: #2b8a3e;
+}
+
+.slot-check.fail {
+  color: #c92a2a;
+}
+
+.slot-check.skipped {
+  color: #9aa5b8;
+  font-weight: 400;
+}
+
+.slot-violation {
+  font-weight: 400;
+  font-size: 11.5px;
+  color: #c92a2a;
+  margin-top: 1px;
+  white-space: normal;
+  text-align: left;
+  line-height: 1.4;
+}
+
+tr.row-fail {
+  background: #fff5f5;
+}
+
+tr.row-fail:hover {
+  background: #ffe8e8;
 }
 
 .slot-offset {
@@ -215,6 +277,10 @@ th {
 td.blank {
   color: #9aa5b8;
   background: #fafbfc;
+}
+
+tr.row-fail td.blank {
+  background: #fff5f5;
 }
 
 details {

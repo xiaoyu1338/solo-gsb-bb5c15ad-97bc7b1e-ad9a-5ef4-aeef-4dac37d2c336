@@ -17,9 +17,12 @@ app.get('/api/health', (req, res) => {
  * 拼版计算接口。
  * 请求体：{
  *   totalPages, sheetsPerSignature, binding: 'left'|'right', flip: 'long'|'short',
- *   paperThickness?, maxCompensation?   // 可选，纸张厚度与爬移最大补偿量（mm，缺省/为 0 不补偿）
+ *   paperThickness?, maxCompensation?,        // 可选，纸张厚度与爬移最大补偿量（mm，缺省/为 0 不补偿）
+ *   paperWidth?, paperHeight?,                 // 纸张宽高（mm，>0；与成品页宽高四项同时提供才启用纸张检查）
+ *   pageWidth?, pageHeight?,                   // 成品页宽高（mm，>0）
+ *   bleed?, safetyMargin?                      // 可选，出血与安全边距（mm，≥0，缺省 0）
  * }
- * 响应：拼版清单 JSON（与前端「导出拼版清单 JSON」内容一致）
+ * 响应：拼版清单 JSON（启用检查时顶层带 checks 汇总，每个页位带 check；与前端「导出拼版清单 JSON」内容一致）
  */
 app.post('/api/impose', (req, res) => {
   try {
@@ -35,6 +38,12 @@ app.use('/api', (req, res) => {
 });
 
 const PORT = Number(process.env.PORT) || 8080;
-app.listen(PORT, () => {
-  console.log(`骑马钉拼版预演已启动: http://localhost:${PORT}`);
-});
+
+// 仅在直接运行（node server.js）时监听端口，便于测试文件 require 复用 app。
+if (require.main === module) {
+  app.listen(PORT, () => {
+    console.log(`骑马钉拼版预演已启动: http://localhost:${PORT}`);
+  });
+}
+
+module.exports = app;

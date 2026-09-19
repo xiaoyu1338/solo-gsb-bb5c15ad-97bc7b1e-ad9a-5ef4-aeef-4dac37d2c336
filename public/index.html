@@ -47,6 +47,31 @@
         <label for="maxCompensation">最大补偿量（mm）</label>
         <input id="maxCompensation" type="number" min="0" max="100" step="0.1" value="0">
       </div>
+      <div class="field-group-title">纸张规格 / 出血 / 安全区检查（尺寸项全部留空则不启用）</div>
+      <div class="field">
+        <label for="paperWidth">纸张宽度（mm）</label>
+        <input id="paperWidth" type="number" min="0" max="10000" step="0.1" value="450" placeholder="如 450（SRA3）">
+      </div>
+      <div class="field">
+        <label for="paperHeight">纸张高度（mm）</label>
+        <input id="paperHeight" type="number" min="0" max="10000" step="0.1" value="320" placeholder="如 320（SRA3）">
+      </div>
+      <div class="field">
+        <label for="pageWidth">成品页宽度（mm）</label>
+        <input id="pageWidth" type="number" min="0" max="10000" step="0.1" value="210" placeholder="如 210（A4）">
+      </div>
+      <div class="field">
+        <label for="pageHeight">成品页高度（mm）</label>
+        <input id="pageHeight" type="number" min="0" max="10000" step="0.1" value="297" placeholder="如 297（A4）">
+      </div>
+      <div class="field">
+        <label for="bleed">出血（mm）</label>
+        <input id="bleed" type="number" min="0" max="1000" step="0.1" value="3">
+      </div>
+      <div class="field">
+        <label for="safetyMargin">安全边距（mm）</label>
+        <input id="safetyMargin" type="number" min="0" max="1000" step="0.1" value="5">
+      </div>
       <div class="field actions">
         <button type="submit">生成拼版</button>
       </div>
@@ -54,6 +79,8 @@
     <p class="hint">
       每帖页数 = 每帖张数 × 4；总页数不足整帖时，自动在末尾补空白页。
       纸张厚度与最大补偿量任一为 0（或缺省）时不做爬移补偿；启用后第 i 张（由外向内 i 从 0 起）补偿量 = min(i × 纸张厚度 × 2, 最大补偿量) mm。
+      纸张宽高与成品页宽高四项同时填写时启用检查：成品框订口侧贴折缝、上下居中放置，按每个正/背面页位的实际方向（长边翻转背面旋转 180°）计算可用矩形，
+      依次校验成品框是否越界（trim）、出血是否落到纸外（bleed）、纸边余量是否小于安全边距（safety）；空白页位跳过。
     </p>
     <p class="error" id="errorBox" hidden></p>
   </section>

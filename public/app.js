@@ -4,6 +4,7 @@
 
 const BINDING_TEXT = { left: '左装订', right: '右装订' };
 const FLIP_TEXT = { long: '长边翻转', short: '短边翻转' };
+const LEVEL_TEXT = { trim: '成品越界', bleed: '出血不足', safety: '安全余量不足' };
 
 const CANVAS_W = 1240;
 const CANVAS_H = 720;
@@ -26,6 +27,13 @@ const state = {
   idx: 0,
 };
 
+/** 读取一个可能为空的数字输入：空串 -> undefined（未提供），否则为数字（合法性由服务端判定）。 */
+function readOptionalNumber(id) {
+  const el = document.getElementById(id);
+  const raw = el.value.trim();
+  return raw === '' ? undefined : Number(raw);
+}
+
 /* ------------------------------ 数据获取与渲染 ------------------------------ */
 
 form.addEventListener('submit', async (event) => {
@@ -39,6 +47,12 @@ form.addEventListener('submit', async (event) => {
     flip: document.getElementById('flip').value,
     paperThickness: Number(document.getElementById('paperThickness').value),
     maxCompensation: Number(document.getElementById('maxCompensation').value),
+    paperWidth: readOptionalNumber('paperWidth'),
+    paperHeight: readOptionalNumber('paperHeight'),
+    pageWidth: readOptionalNumber('pageWidth'),
+    pageHeight: readOptionalNumber('pageHeight'),
+    bleed: readOptionalNumber('bleed'),
+    safetyMargin: readOptionalNumber('safetyMargin'),
   };
 
   try {
@@ -112,25 +126,88 @@ function renderAll() {
 function renderSummary() {
   const r = state.result;
   const chips = [
-    `成品 ${r.input.totalPages} 页`,
-    `每帖 ${r.input.sheetsPerSignature} 张（${r.pagesPerSignature} 页）`,
-    `共 ${r.signatureCount} 帖`,
-    `补白后 ${r.paddedPages} 页`,
-    r.blankPages > 0 ? `自动补空白页 ${r.blankPages} 页` : '无需补白',
-    BINDING_TEXT[r.input.binding],
-    FLIP_TEXT[r.input.flip],
-    r.creep.enabled
-      ? `爬移补偿：纸厚 ${formatMm(r.input.paperThickness)} mm · 上限 ${formatMm(r.input.maxCompensation)} mm`
-      : '爬移补偿：未启用',
+    { text: `成品 ${r.input.totalPages} 页` },
+    { text: `每帖 ${r.input.sheetsPerSignature} 张（${r.pagesPerSignature} 页）` },
+    { text: `共 ${r.signatureCount} 帖` },
+    { text: `补白后 ${r.paddedPages} 页` },
+    { text: r.blankPages > 0 ? `自动补空白页 ${r.blankPages} 页` : '无需补白', cls: r.blankPages > 0 ? 'warn' : '' },
+    { text: BINDING_TEXT[r.input.binding] },
+    { text: FLIP_TEXT[r.input.flip] },
+    {
+      text: r.creep.enabled
+        ? `爬移补偿：纸厚 ${formatMm(r.input.paperThickness)} mm · 上限 ${formatMm(r.input.maxCompensation)} mm`
+        : '爬移补偿：未启用',
+      cls: r.creep.enabled ? 'creep' : 'creep-off',
+    },
   ];
+  if (r.checks) {
+    const t = r.checks.totals;
+    if (r.checks.fit) {
+      chips.push({ text: `纸张检查：全部适配 ✓（已检 ${t.checkedSlots} 页位${t.skippedBlankSlots ? `，空白跳过 ${t.skippedBlankSlots}` : ''}）`, cls: 'check-ok' });
+    } else {
+      const lvl = LEVEL_TEXT[t.worstLevel] || '不合格';
+      chips.push({ text: `纸张检查：${t.failedSlots}/${t.checkedSlots} 个页位不合格（最严重：${lvl}）✗`, cls: 'check-fail' });
+    }
+  } else {
+    chips.push({ text: '纸张检查：未启用', cls: 'check-off' });
+  }
   summaryBox.innerHTML = '';
-  chips.forEach((text, i) => {
+  chips.forEach(({ text, cls }) => {
     const span = document.createElement('span');
-    span.className = 'chip' + (i === 4 && r.blankPages > 0 ? ' warn' : '');
-    if (i === 7) span.className = 'chip' + (r.creep.enabled ? ' creep' : ' creep-off');
+    span.className = 'chip' + (cls ? ` ${cls}` : '');
     span.textContent = text;
     summaryBox.appendChild(span);
   });
+}
+
+/** 汇总一张纸的正面/背面四个页位的检查状态。 */
+function sheetCheckStats(r, sig, sheet) {
+  let fail = 0;
+  let checked = 0;
+  ['front', 'back'].forEach((sideName) => {
+    ['left', 'right'].forEach((pos) => {
+      const chk = sheet[sideName][pos].check;
+      if (chk && chk.status !== 'skipped') {
+        checked += 1;
+        if (!chk.fit) fail += 1;
+      }
+    });
+  });
+  return { fail, checked };
+}
+
+/** Canvas 面板标题用的一面检查角标状态。 */
+function sideCheckStatus(side) {
+  if (!side.left.check) return null;
+  let fail = 0;
+  let skip = 0;
+  [side.left, side.right].forEach((slot) => {
+    if (slot.check.status === 'skipped') skip += 1;
+    else if (!slot.check.fit) fail += 1;
+  });
+  if (fail > 0) return { key: 'fail', text: `✗ ${fail} 个页位不合格`, color: '#e03131' };
+  if (skip === 2) return { key: 'skip', text: '（空白跳过）', color: '#9aa5b8' };
+  return { key: 'fit', text: '✓ 适配', color: '#2f9e44' };
+}
+
+/** 绘制面板标题：基础文字深色 + 检查状态文字彩色。 */
+function drawPanelTitle(ctx, baseTitle, status, cx, y) {
+  ctx.save();
+  ctx.font = 'bold 16px system-ui, sans-serif';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'alphabetic';
+  ctx.fillStyle = '#16233b';
+  const baseW = ctx.measureText(baseTitle).width;
+  const gap = status ? 8 : 0;
+  const statusW = status ? ctx.measureText(status.text).width : 0;
+  const startX = cx - (baseW + gap + statusW) / 2;
+  ctx.textAlign = 'left';
+  ctx.fillText(baseTitle, startX, y);
+  if (status) {
+    ctx.fillStyle = status.color;
+    ctx.fillText(status.text, startX + baseW + gap, y);
+  }
+  ctx.restore();
 }
 
 /** mm 数值格式化为两位小数（保留正负号）。 */
@@ -146,7 +223,8 @@ function renderSheetNav() {
     const sheet = sig.sheets[pos.shi];
     const opt = document.createElement('option');
     opt.value = String(i);
-    opt.textContent = `第 ${sig.index} 帖 · 第 ${sheet.index} 张`;
+    const stats = sheetCheckStats(r, sig, sheet);
+    opt.textContent = `第 ${sig.index} 帖 · 第 ${sheet.index} 张` + (stats.fail > 0 ? `　✗ ${stats.fail} 个页位不合格` : '');
     sheetSelect.appendChild(opt);
   });
   sheetSelect.value = String(state.idx);
@@ -180,6 +258,7 @@ function renderTable() {
           td.textContent = t;
           tr.appendChild(td);
         });
+        let rowFail = false;
         [side.left, side.right].forEach((slot) => {
           const td = document.createElement('td');
           const main = document.createElement('div');
@@ -190,16 +269,59 @@ function renderTable() {
           off.className = 'slot-offset' + (creepOn && slot.offsetMm !== 0 ? ' nonzero' : '');
           off.textContent = `偏移 ${slot.offsetMm > 0 ? '+' : ''}${formatMm(slot.offsetMm)} mm`;
           td.appendChild(off);
-          if (slot.blank) td.className = 'blank';
+          if (slot.check) {
+            const chk = document.createElement('div');
+            if (slot.check.status === 'skipped') {
+              chk.className = 'slot-check skipped';
+              chk.textContent = '空白页 · 跳过检查';
+            } else if (slot.check.fit) {
+              chk.className = 'slot-check fit';
+              chk.textContent = '✓ 适配';
+            } else {
+              chk.className = 'slot-check fail';
+              const lvl = worstLevel(slot.check);
+              chk.textContent = `✗ ${LEVEL_TEXT[lvl]} · ${slot.check.violations.length} 项`;
+              slot.check.violations.forEach((v) => {
+                const item = document.createElement('div');
+                item.className = `slot-violation level-${v.level}`;
+                item.textContent = `· ${v.message}`;
+                chk.appendChild(item);
+              });
+              rowFail = true;
+            }
+            td.appendChild(chk);
+          }
+          if (slot.blank) td.classList.add('blank');
           tr.appendChild(td);
         });
+        if (rowFail) tr.classList.add('row-fail');
         const tdNote = document.createElement('td');
-        tdNote.textContent = `${note}；${creepNote}`;
+        const notes = [`${note}；${creepNote}`];
+        if (checksOn) notes.push(checkSideNote(side));
+        tdNote.textContent = notes.join('；');
         tr.appendChild(tdNote);
         tableBody.appendChild(tr);
       });
     });
   });
+}
+
+/** 取一个页位检查结果中的最严重级别（trim > bleed > safety）。 */
+function worstLevel(chk) {
+  const rank = { trim: 3, bleed: 2, safety: 1 };
+  return chk.violations.reduce((best, v) => (rank[v.level] > rank[best] ? v.level : best), 'safety');
+}
+
+/** 一面两个页位的检查汇总文字（用于清单备注列）。 */
+function checkSideNote(side) {
+  const parts = ['left', 'right'].map((pos) => {
+    const chk = side[pos].check;
+    if (!chk) return '';
+    if (chk.status === 'skipped') return `${pos === 'left' ? '左' : '右'}：空白跳过`;
+    if (chk.fit) return `${pos === 'left' ? '左' : '右'}✓`;
+    return `${pos === 'left' ? '左' : '右'}✗${chk.violations.length}项`;
+  });
+  return `检查：${parts.join(' / ')}`;
 }
 
 /* ------------------------------ Canvas 绘制 ------------------------------ */
@@ -250,25 +372,36 @@ function draw() {
   const creepSubtitle = r.creep.enabled
     ? `　爬移补偿：纸厚 ${formatMm(r.input.paperThickness)} mm · 上限 ${formatMm(r.input.maxCompensation)} mm · 本张补偿 ${formatMm(r.creep.sheetCompensationMm[sheet.index - 1])} mm`
     : '　爬移补偿未启用';
+  const checkSubtitle = r.checks
+    ? `　纸张 ${formatMm(r.checks.paperMm.width)}×${formatMm(r.checks.paperMm.height)} mm · 成品页 ${formatMm(r.checks.pageMm.width)}×${formatMm(r.checks.pageMm.height)} mm · 出血 ${formatMm(r.checks.bleedMm)} mm · 安全 ${formatMm(r.checks.safetyMm)} mm`
+    : '　纸张检查未启用';
   ctx.fillText(
-    `装订：${BINDING_TEXT[binding]}　双面翻转：${FLIP_TEXT[flip]}　成品 ${r.input.totalPages} 页 · 补白 ${r.blankPages} 页 · 共 ${r.paddedPages} 页${creepSubtitle}`,
+    `装订：${BINDING_TEXT[binding]}　双面翻转：${FLIP_TEXT[flip]}　成品 ${r.input.totalPages} 页 · 补白 ${r.blankPages} 页 · 共 ${r.paddedPages} 页${creepSubtitle}${checkSubtitle}`,
     40, 70
   );
 
+  // 本张纸的页位检查统计
+  const sheetStats = sheetCheckStats(r, sig, sheet);
+  if (r.checks && sheetStats.fail > 0) {
+    ctx.fillStyle = '#e03131';
+    ctx.font = 'bold 15px system-ui, sans-serif';
+    ctx.fillText(`⚠ 本张纸有 ${sheetStats.fail} 个页位不合格（红色框标注，页位下方列出超限原因）`, 40, 94);
+  }
+
   const sheetW = 460;
-  const sheetH = 340;
-  const top = 136;
+  const sheetH = 320;
+  const top = 112;
   const frontRect = { x: 70, y: top, w: sheetW, h: sheetH };
   const backRect = { x: 710, y: top, w: sheetW, h: sheetH };
 
   // 面板标题
-  ctx.textAlign = 'center';
-  ctx.fillStyle = '#16233b';
-  ctx.font = 'bold 16px system-ui, sans-serif';
-  ctx.fillText('正面（第 1 面）', frontRect.x + sheetW / 2, top - 16);
-  ctx.fillText(
+  drawPanelTitle(ctx, '正面（第 1 面）', sideCheckStatus(sheet.front), frontRect.x + sheetW / 2, top - 16);
+  drawPanelTitle(
+    ctx,
     flip === 'long' ? '背面（第 2 面 · 内容旋转 180°）' : '背面（第 2 面）',
-    backRect.x + sheetW / 2, top - 16
+    sideCheckStatus(sheet.back),
+    backRect.x + sheetW / 2,
+    top - 16
   );
 
   // 爬移像素比例：示意性放大，保证最大补偿量在页位内至少留 18px 边距且不超过页位宽 35%
@@ -281,7 +414,7 @@ function draw() {
   drawSheet(ctx, frontRect, sheet.front, { rotated: false, isBack: false, ...drawOpts });
   drawSheet(ctx, backRect, sheet.back, { rotated: flip === 'long', isBack: true, ...drawOpts });
   drawFlipDiagram(ctx, { x: 530, y: top, w: 180, h: sheetH }, flip);
-  drawNotes(ctx, r.input, r.creep);
+  drawNotes(ctx, r.input, r.creep, r.checks);
 }
 
 /** 绘制一张纸的一面：纸面、裁切角线、左右页位、折线与骑马钉。 */
@@ -322,9 +455,13 @@ function drawSheet(ctx, rect, side, opts) {
     ctx.fill();
   });
   ctx.fillStyle = '#d6336c';
-  ctx.font = '12px system-ui, sans-serif';
+  ctx.font = 'bold 12px system-ui, sans-serif';
   ctx.textAlign = 'center';
-  ctx.fillText('折线 · 订口（骑马钉）', midX, rect.y + rect.h + 20);
+  ctx.save();
+  ctx.translate(midX, rect.y + rect.h / 2);
+  ctx.rotate(-Math.PI / 2);
+  ctx.fillText('折线 · 订口（骑马钉）', 0, 0);
+  ctx.restore();
   ctx.restore();
 }
 
@@ -360,8 +497,15 @@ function drawSlot(ctx, rect, slot, opts, posName) {
   const cx = inner.x + inner.w / 2;
   const cy = inner.y + inner.h / 2;
 
-  ctx.strokeStyle = shiftPx !== 0 ? '#e8820c' : '#c4ccd9';
-  ctx.lineWidth = shiftPx !== 0 ? 1.8 : 1;
+  // 框线颜色：检查不合格 = 红色粗框；否则爬移后橙框、普通灰框
+  const checkFail = slot.check && slot.check.status === 'fail';
+  if (checkFail) {
+    ctx.strokeStyle = '#e03131';
+    ctx.lineWidth = 2.4;
+  } else {
+    ctx.strokeStyle = shiftPx !== 0 ? '#e8820c' : '#c4ccd9';
+    ctx.lineWidth = shiftPx !== 0 ? 1.8 : 1;
+  }
   ctx.strokeRect(inner.x, inner.y, inner.w, inner.h);
 
   if (slot.blank) {
@@ -429,6 +573,64 @@ function drawSlot(ctx, rect, slot, opts, posName) {
     ctx.textAlign = 'center';
     ctx.fillText(`位于正面第 ${slot.backOf} 页之背`, cx, inner.y + inner.h - 22);
   }
+
+  // 纸张/出血/安全区检查：左上角徽标（绿✓ / 红✗ / 灰跳过）
+  if (slot.check) {
+    if (slot.check.status === 'skipped') {
+      drawCheckBadge(ctx, inner.x + 4, inner.y + 14, '— 检查跳过（空白页）', '#9aa5b8');
+    } else if (slot.check.fit) {
+      drawCheckBadge(ctx, inner.x + 4, inner.y + 14, '✓ 适配', '#2f9e44');
+    } else {
+      const lvl = worstLevel(slot.check);
+      drawCheckBadge(ctx, inner.x + 4, inner.y + 14, `✗ ${LEVEL_TEXT[lvl]}`, '#e03131');
+    }
+  }
+  ctx.restore();
+
+  // 不合格页位的超限原因列在页位框下方（页面坐标系，不随爬移/旋转平移）
+  if (checkFail) {
+    drawViolationLines(ctx, rect, pad, slot.check);
+  }
+}
+
+/** 页位框内左上角检查徽标（带浅色底，避免与页码/页首标注重叠时不可读）。 */
+function drawCheckBadge(ctx, x, y, text, color) {
+  ctx.save();
+  ctx.font = 'bold 11px system-ui, sans-serif';
+  const w = ctx.measureText(text).width;
+  ctx.fillStyle = 'rgba(255,255,255,0.85)';
+  ctx.fillRect(x - 3, y - 11, w + 6, 15);
+  ctx.fillStyle = color;
+  ctx.textAlign = 'left';
+  ctx.textBaseline = 'top';
+  ctx.fillText(text, x, y - 10);
+  ctx.restore();
+}
+
+const EDGE_SHORT = { outer: '外切口', inner: '订口', top: '上', bottom: '下' };
+
+/** 页位框下方列出该页位的全部超限原因（按级别与边缩写，最多 4 条）。 */
+function drawViolationLines(ctx, rect, pad, chk) {
+  const lines = chk.violations.slice(0, 4).map((v) => {
+    const lvl = v.level === 'trim' ? '成品越界' : v.level === 'bleed' ? '出血不足' : '安全不足';
+    const m = formatMm(v.actualMm);
+    return `✗ [${lvl}] ${EDGE_SHORT[v.edge]}：实际 ${m} mm，需 ${formatMm(v.requiredMm)} mm，缺 ${formatMm(v.shortByMm)} mm`;
+  });
+  if (chk.violations.length > 4) lines.push(`……另 ${chk.violations.length - 4} 项`);
+  ctx.save();
+  ctx.font = '10.5px system-ui, sans-serif';
+  ctx.textAlign = 'left';
+  ctx.textBaseline = 'top';
+  const x = rect.x + 2;
+  let y = rect.y + rect.h + pad;
+  lines.forEach((line) => {
+    ctx.fillStyle = 'rgba(255,255,255,0.7)';
+    const w = ctx.measureText(line).width;
+    ctx.fillRect(x - 1, y - 1, w + 2, 13);
+    ctx.fillStyle = '#e03131';
+    ctx.fillText(line, x, y);
+    y += 13;
+  });
   ctx.restore();
 }
 
@@ -563,9 +765,9 @@ function drawFlipDiagram(ctx, zone, flip) {
 }
 
 /** 底部图例与规则说明。 */
-function drawNotes(ctx, input, creep) {
+function drawNotes(ctx, input, creep, checks) {
   const lines = [
-    '图例：蓝色数字 = 成品页码；灰色斜纹 = 自动补齐的空白页；红色虚线 = 对折线（订口）；灰色小角线 = 裁切标记。',
+    '图例：蓝色数字 = 成品页码；灰色斜纹 = 自动补齐的空白页；红色虚线 = 对折线（订口）；灰色小角线 = 裁切标记；红色粗框 = 页位检查不合格。',
     input.flip === 'long'
       ? '长边翻转：纸张绕水平长边翻转，背面左右页位与正面相同，背面内容旋转 180°（页首朝下）。'
       : '短边翻转：纸张绕垂直短边翻转，背面左右页位与正面互换，背面内容方向不变。',
@@ -584,13 +786,18 @@ function drawNotes(ctx, input, creep) {
   } else {
     lines.push('爬移补偿未启用（纸张厚度或最大补偿量为 0）：各页位 offsetMm 均为 0，仅显示原始拼版页位。');
   }
+  if (checks && checks.enabled) {
+    lines.push(
+      `纸张检查：纸张 ${formatMm(checks.paperMm.width)}×${formatMm(checks.paperMm.height)} mm，成品页 ${formatMm(checks.pageMm.width)}×${formatMm(checks.pageMm.height)} mm，出血 ${formatMm(checks.bleedMm)} mm、安全边距 ${formatMm(checks.safetyMm)} mm。`,
+      '判定：成品框越界（含爬移后越过折缝）= 成品越界；纸边余量小于出血要求 = 出血不足；小于安全边距 = 安全余量不足；订口侧出血允许跨缝，只查越折缝。'
+    );
+  }
   ctx.save();
-  ctx.font = '13px system-ui, sans-serif';
+  ctx.font = '12.5px system-ui, sans-serif';
   ctx.textAlign = 'left';
-  ctx.fillStyle = '#5a6b85';
   lines.forEach((line, i) => {
-    if (i === 4) ctx.fillStyle = '#b0691a';
-    ctx.fillText(`· ${line}`, 70, 540 + i * 25);
+    ctx.fillStyle = '#5a6b85';
+    ctx.fillText(`· ${line}`, 70, 578 + i * 23);
   });
   ctx.restore();
 }

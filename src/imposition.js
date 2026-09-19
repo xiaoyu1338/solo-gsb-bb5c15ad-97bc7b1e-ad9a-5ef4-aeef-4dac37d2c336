@@ -25,10 +25,18 @@
  * - 偏移符号：左装订时左页位取正、右页位取负；右装订时符号整体反转。
  * - 每个页位（含空白页）都带 offsetMm；纸张厚度或最大补偿量任一为 0（或缺省）时
  *   全部 offsetMm 为 0，页码拼版结果与不启用时完全一致。
+ *
+ * 纸张规格 / 出血 / 安全区检查（可选，见 checks.js）：
+ * - 传入纸张宽高、成品页宽高（出血与安全边距可选）后，按每个正/背面页位的实际方向
+ *   （长边翻转的背面内容旋转 180°）计算可用矩形、成品框、出血框、安全框并判定是否适配；
+ * - 检查结果挂在每个页位的 check 字段与顶层 checks 汇总；缺省不传时 checks 为 null，
+ *   页码拼版算法与旧版完全一致。
  */
 
 const MAX_TOTAL_PAGES = 10000;
 const MAX_SHEETS_PER_SIGNATURE = 100;
+
+const { parseChecks, attachChecks } = require('./checks');
 
 function toInteger(value) {
   const n = Number(value);
@@ -71,7 +79,13 @@ function makeSlot(page, totalPages) {
  * @param {string} input.flip               双面翻转方式：'long' | 'short'
  * @param {number} [input.paperThickness]   纸张厚度（mm，≥0，缺省 0 = 不做爬移补偿）
  * @param {number} [input.maxCompensation]  爬移最大补偿量（mm，≥0，缺省 0 = 不做爬移补偿）
- * @returns {object} 拼版结果（按帖 -> 张 -> 正/背面 -> 左/右页位）
+ * @param {number} [input.paperWidth]       纸张宽度（mm，>0，与其余 3 个尺寸项同时提供才启用纸张检查）
+ * @param {number} [input.paperHeight]      纸张高度（mm，>0）
+ * @param {number} [input.pageWidth]        成品页宽度（mm，>0）
+ * @param {number} [input.pageHeight]       成品页高度（mm，>0）
+ * @param {number} [input.bleed]            出血（mm，≥0，缺省 0）
+ * @param {number} [input.safetyMargin]     安全边距（mm，≥0，缺省 0；不得超过成品页宽/高的一半）
+ * @returns {object} 拼版结果（按帖 -> 张 -> 正/背面 -> 左/右页位；启用检查时每个页位带 check，顶层带 checks 汇总）
  */
 function computeImposition(input) {
   const totalPages = toInteger(input && input.totalPages);
@@ -99,6 +113,10 @@ function computeImposition(input) {
   if (Number.isNaN(maxCompensation)) {
     throw new Error('最大补偿量必须为 ≥ 0 的数字（单位 mm）');
   }
+
+  // 纸张规格 / 出血 / 安全区检查参数（全部缺省时不启用，向后兼容）。
+  // 参数合法性错误直接抛出，与其它参数一样由接口返回 400。
+  const checkConfig = parseChecks(input);
 
   const pagesPerSignature = sheetsPerSignature * 4;
   const signatureCount = Math.ceil(totalPages / pagesPerSignature);
@@ -167,13 +185,24 @@ function computeImposition(input) {
     signatures.push({ index: s + 1, pageStart: start, pageEnd: end, sheets });
   }
 
-  return {
+  // 未启用检查时 input 回显保持原样（旧调用方输出不变）；启用时追加纸张规格字段。
+  const inputEcho = { totalPages, sheetsPerSignature, binding, flip, paperThickness, maxCompensation };
+  if (checkConfig.enabled) {
+    inputEcho.paperWidth = checkConfig.paperMm.width;
+    inputEcho.paperHeight = checkConfig.paperMm.height;
+    inputEcho.pageWidth = checkConfig.pageMm.width;
+    inputEcho.pageHeight = checkConfig.pageMm.height;
+    inputEcho.bleed = checkConfig.bleedMm;
+    inputEcho.safetyMargin = checkConfig.safetyMm;
+  }
+
+  const result = {
     meta: {
       app: 'saddle-stitch-imposition',
-      version: '1.1.0',
+      version: '1.2.0',
       generatedAt: new Date().toISOString(),
     },
-    input: { totalPages, sheetsPerSignature, binding, flip, paperThickness, maxCompensation },
+    input: inputEcho,
     pagesPerSignature,
     signatureCount,
     paddedPages,
@@ -187,6 +216,11 @@ function computeImposition(input) {
     },
     signatures,
   };
+
+  // 纸张 / 出血 / 安全区检查：未启用时 checks 为 null，页码拼版算法结果完全不变。
+  result.checks = attachChecks(checkConfig, result);
+
+  return result;
 }
 
 module.exports = { computeImposition };
