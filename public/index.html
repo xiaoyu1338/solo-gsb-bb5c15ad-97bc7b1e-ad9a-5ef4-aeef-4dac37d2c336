@@ -1,0 +1,91 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>骑马钉小册子拼版预演</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header>
+    <h1>骑马钉小册子拼版预演</h1>
+    <p>
+      输入成品页数、每帖张数、装订方向与双面翻转方式，系统自动补空白页、按帖拆分页码，
+      生成每张纸正反面的左右页位；背面依据长边 / 短边翻转执行坐标变换，保证裁切折叠后的阅读顺序。
+    </p>
+  </header>
+
+  <section class="card">
+    <form id="imposeForm">
+      <div class="field">
+        <label for="totalPages">成品页数</label>
+        <input id="totalPages" type="number" min="1" max="10000" step="1" value="16" required>
+      </div>
+      <div class="field">
+        <label for="sheetsPerSignature">每帖张数</label>
+        <input id="sheetsPerSignature" type="number" min="1" max="100" step="1" value="2" required>
+      </div>
+      <div class="field">
+        <label for="binding">装订方式</label>
+        <select id="binding">
+          <option value="left" selected>左装订（第 1 页在右）</option>
+          <option value="right">右装订（第 1 页在左）</option>
+        </select>
+      </div>
+      <div class="field">
+        <label for="flip">双面翻转方式</label>
+        <select id="flip">
+          <option value="short" selected>短边翻转（左右页位互换）</option>
+          <option value="long">长边翻转（内容旋转 180°）</option>
+        </select>
+      </div>
+      <div class="field">
+        <label for="paperThickness">纸张厚度（mm）</label>
+        <input id="paperThickness" type="number" min="0" max="100" step="0.01" value="0">
+      </div>
+      <div class="field">
+        <label for="maxCompensation">最大补偿量（mm）</label>
+        <input id="maxCompensation" type="number" min="0" max="100" step="0.1" value="0">
+      </div>
+      <div class="field actions">
+        <button type="submit">生成拼版</button>
+      </div>
+    </form>
+    <p class="hint">
+      每帖页数 = 每帖张数 × 4；总页数不足整帖时，自动在末尾补空白页。
+      纸张厚度与最大补偿量任一为 0（或缺省）时不做爬移补偿；启用后第 i 张（由外向内 i 从 0 起）补偿量 = min(i × 纸张厚度 × 2, 最大补偿量) mm。
+    </p>
+    <p class="error" id="errorBox" hidden></p>
+  </section>
+
+  <section class="card" id="resultCard" hidden>
+    <div class="summary" id="summary"></div>
+    <div class="toolbar">
+      <button id="prevBtn" type="button" class="ghost">← 上一张</button>
+      <select id="sheetSelect" aria-label="选择纸张"></select>
+      <button id="nextBtn" type="button" class="ghost">下一张 →</button>
+      <span class="spacer"></span>
+      <button id="exportBtn" type="button">导出拼版清单 JSON</button>
+    </div>
+    <canvas id="sheetCanvas" width="1240" height="720"></canvas>
+
+    <h2>拼版清单</h2>
+    <div class="table-wrap">
+      <table id="sheetTable">
+        <thead>
+          <tr><th>帖</th><th>张</th><th>面</th><th>左页位</th><th>右页位</th><th>备注</th></tr>
+        </thead>
+        <tbody></tbody>
+      </table>
+    </div>
+
+    <details>
+      <summary>查看拼版清单 JSON</summary>
+      <pre id="jsonPreview"></pre>
+    </details>
+  </section>
+
+  <footer>骑马钉拼版预演 · Node.js + Express + 原生 Canvas</footer>
+  <script src="app.js"></script>
+</body>
+</html>
