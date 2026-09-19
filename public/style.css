@@ -144,6 +144,34 @@ button.ghost:disabled {
   color: #8a94a6;
 }
 
+.summary .chip.fit-ok {
+  background: #e6f7ec;
+  color: #1e7e34;
+}
+
+.summary .chip.fit-fail {
+  background: #ffe3e3;
+  color: #c92a2a;
+}
+
+.slot-fit {
+  margin-top: 2px;
+  font-size: 12px;
+}
+
+.slot-fit.ok {
+  color: #1e7e34;
+}
+
+.slot-fit.fail {
+  color: #c92a2a;
+  font-weight: 600;
+}
+
+td.fit-fail {
+  background: #fff5f5;
+}
+
 .slot-offset {
   margin-top: 2px;
   font-size: 12px;

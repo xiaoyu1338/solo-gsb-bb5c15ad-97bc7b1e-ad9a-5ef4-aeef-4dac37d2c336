@@ -8,8 +8,9 @@
 - **按帖拆分页码**（每帖页数 = 每帖张数 × 4），生成每张纸正、反面的左右页位；
 - 背面依据 **长边 / 短边翻转** 执行坐标变换，保证裁切折叠后的阅读顺序；
 - 可选 **爬移补偿（creep compensation）**：按纸张厚度由外向内平移内层页位，画布叠加原始页位虚线框与补偿后实线框，每个页位（含空白页）输出 `offsetMm`；
+- 可选 **纸张规格与出血 / 安全区适配检查**：输入纸张宽高、成品页宽高、出血与安全边距后，按每个正反页位的实际方向计算可用矩形，逐页位判定成品页是否放得下、出血是否落在纸张内、安全边距是否过大，并在逐张预览与清单中标出不合格页位；
 - 画布**逐张显示**纸面、页码、空白页位与翻转方向示意；
-- 一键**导出拼版清单 JSON**。
+- 一键**导出拼版清单 JSON**（包含适配检查结果）。
 
 ## 快速开始（Docker）
 
@@ -56,6 +57,19 @@ npm test           # 运行拼版逻辑单元测试
 
 画布上橙色**虚线框**表示补偿前的原始页位，橙色**实线框**表示补偿后页位；画布位移为示意性放大（非真实 mm 等比），精确数值以清单和导出 JSON 中的 `offsetMm` 为准。
 
+### 纸张规格与出血 / 安全区适配检查
+
+表单中可选填写（均为 mm）：**纸张宽 / 高**、**成品页宽 / 高**、**出血**、**安全边距**。四项尺寸全部留空（或为 0）时不检查，行为与旧版本完全一致；一旦填写其中任意一项，四项尺寸必须全部大于 0，出血与安全边距缺省为 0。
+
+检查规则（纸张坐标系，与正面同一视角）：
+
+- 每个页位的**可用矩形**为纸张的一半：左页位 `[0, W/2] × [0, H]`，右页位 `[W/2, W] × [0, H]`；背面页位与正面共用同一坐标系（长边翻转左右不变、短边翻转左右互换），每个页位同时返回内容方向 `rotation`（长边翻转的背面为 180°，其余为 0°）；
+- 成品页在页位内**居中放置**，并叠加该页位的爬移偏移 `offsetMm`，得到裁切框 `trim`；
+- **出血框** `bleedBox` = `trim` 四边各外扩出血，必须完全落在纸张矩形内（折线一侧的出血进入相邻页位属正常工艺，仅纸张外边界构成约束）；
+- **安全区** `safeBox` = `trim` 四边各内缩安全边距；`2 × 安全边距` 超过成品页宽 / 高时安全区不存在，记为超限。
+
+每个页位（含空白页）输出 `fit`：`{ ok, rotation, rect, trim, bleedBox, safeBox, violations }`，`violations` 逐条给出超限原因（`page-too-wide` / `page-too-tall` / `bleed-overflow-{left,top,right,bottom}` / `safety-too-wide` / `safety-too-tall`，含具体超出量）；顶层 `fit` 汇总 `ok / totalSlots / failCount`。画布上蓝框 = 裁切线、绿/红虚框 = 出血范围（红 = 超出纸张）、灰点框 = 安全区，不合格页位带红色圆徽，清单对应单元格标红并列出原因。
+
 ## API
 
 ### `POST /api/impose`
@@ -69,7 +83,13 @@ npm test           # 运行拼版逻辑单元测试
   "binding": "left",
   "flip": "short",
   "paperThickness": 0.1,
-  "maxCompensation": 2
+  "maxCompensation": 2,
+  "paperWidth": 440,
+  "paperHeight": 310,
+  "pageWidth": 210,
+  "pageHeight": 297,
+  "bleedMm": 3,
+  "safetyMm": 5
 }
 ```
 
@@ -79,10 +99,12 @@ npm test           # 运行拼版逻辑单元测试
 - `flip`：`long`（长边翻转）或 `short`（短边翻转）
 - `paperThickness`：**可选**，纸张厚度（mm，≥ 0，缺省为 0）
 - `maxCompensation`：**可选**，爬移最大补偿量（mm，≥ 0，缺省为 0）
+- `paperWidth` / `paperHeight` / `pageWidth` / `pageHeight`：**可选**，纸张与成品页宽高（mm）；全部缺省或为 0 时不做适配检查，提供任意一项则四项必须全部 > 0
+- `bleedMm` / `safetyMm`：**可选**，出血与安全边距（mm，≥ 0，缺省为 0）
 
-后两个参数任一为 0（或不传）时不做爬移补偿，所有页位 `offsetMm` 为 0，旧调用方无需改动。
+后两个爬移参数任一为 0（或不传）时不做爬移补偿，所有页位 `offsetMm` 为 0，旧调用方无需改动。
 
-响应（节选）：完整拼版清单，与前端导出的 JSON 一致。`creep.sheetCompensationMm` 按帖由外向内给出每张纸的补偿量；每个页位对象（含空白页）都带 `offsetMm`。
+响应（节选）：完整拼版清单，与前端导出的 JSON 一致。`creep.sheetCompensationMm` 按帖由外向内给出每张纸的补偿量；每个页位对象（含空白页）都带 `offsetMm`；启用适配检查时每个页位另带 `fit`，顶层 `fit` 给出整体汇总。
 
 ```json
 {
@@ -134,18 +156,43 @@ npm test           # 运行拼版逻辑单元测试
 }
 ```
 
-参数非法时返回 `400` 与错误信息（含纸张厚度 / 最大补偿量为负或非数字的情况）。另提供 `GET /api/health` 健康检查。
+启用适配检查时，每个页位对象增加 `fit`，例如：
+
+```json
+{
+  "page": 8,
+  "blank": false,
+  "offsetMm": 0,
+  "fit": {
+    "ok": false,
+    "rotation": 0,
+    "rect": { "x": 0, "y": 0, "width": 220, "height": 310 },
+    "trim": { "x": 5, "y": 6.5, "width": 210, "height": 297 },
+    "bleedBox": { "x": 2, "y": 3.5, "width": 216, "height": 303 },
+    "safeBox": { "x": 10, "y": 11.5, "width": 200, "height": 287 },
+    "violations": [
+      { "code": "bleed-overflow-left", "message": "左侧出血超出纸张 2mm（出血 5mm，含爬移偏移 0mm）" }
+    ]
+  }
+}
+```
+
+顶层 `fit` 汇总：`{ enabled, paperWidth, paperHeight, pageWidth, pageHeight, bleedMm, safetyMm, slotWidth, slotHeight, ok, totalSlots, failCount }`；未启用时仅为 `{ "enabled": false }`。
+
+参数非法时返回 `400` 与错误信息（含纸张厚度 / 最大补偿量为负，尺寸参数为负、非数字或只提供部分尺寸等情况）。另提供 `GET /api/health` 健康检查。
 
 ## 目录结构
 
 ```
 ├── server.js            # Express 服务：静态页面 + /api/impose
 ├── src/imposition.js    # 拼版计算核心（按帖拆分、正反面页位、翻转坐标变换、爬移补偿 offsetMm）
-├── public/              # 前端（原生 Canvas 逐张绘制、原始/补偿页位叠加、JSON 导出）
+├── src/fitCheck.js      # 纸张规格与出血 / 安全区适配检查（可用矩形、trim/bleed/safe、超限原因）
+├── public/              # 前端（原生 Canvas 逐张绘制、原始/补偿页位叠加、适配标记、JSON 导出）
 │   ├── index.html
 │   ├── app.js
 │   └── style.css
 ├── test/imposition.test.js
+├── test/fitCheck.test.js
 ├── Dockerfile
 └── docker-compose.yml
 ```

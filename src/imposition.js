@@ -1,5 +1,7 @@
 'use strict';
 
+const { parseFitInput, attachFit } = require('./fitCheck');
+
 /**
  * 骑马钉（saddle-stitch）拼版计算核心。
  *
@@ -71,7 +73,13 @@ function makeSlot(page, totalPages) {
  * @param {string} input.flip               双面翻转方式：'long' | 'short'
  * @param {number} [input.paperThickness]   纸张厚度（mm，≥0，缺省 0 = 不做爬移补偿）
  * @param {number} [input.maxCompensation]  爬移最大补偿量（mm，≥0，缺省 0 = 不做爬移补偿）
- * @returns {object} 拼版结果（按帖 -> 张 -> 正/背面 -> 左/右页位）
+ * @param {number} [input.paperWidth]       纸张宽（mm，>0 启用适配检查；四项尺寸全缺省则不检查）
+ * @param {number} [input.paperHeight]      纸张高（mm）
+ * @param {number} [input.pageWidth]        成品页宽（mm）
+ * @param {number} [input.pageHeight]       成品页高（mm）
+ * @param {number} [input.bleedMm]          出血（mm，≥0，缺省 0）
+ * @param {number} [input.safetyMm]         安全边距（mm，≥0，缺省 0）
+ * @returns {object} 拼版结果（按帖 -> 张 -> 正/背面 -> 左/右页位；启用适配检查时每个页位带 fit）
  */
 function computeImposition(input) {
   const totalPages = toInteger(input && input.totalPages);
@@ -80,6 +88,7 @@ function computeImposition(input) {
   const flip = input && input.flip;
   const paperThickness = toNonNegativeMm(input && input.paperThickness);
   const maxCompensation = toNonNegativeMm(input && input.maxCompensation);
+  const fit = parseFitInput(input || {});
 
   if (!Number.isInteger(totalPages) || totalPages < 1 || totalPages > MAX_TOTAL_PAGES) {
     throw new Error(`成品页数必须为 1 ~ ${MAX_TOTAL_PAGES} 的整数`);
@@ -167,13 +176,26 @@ function computeImposition(input) {
     signatures.push({ index: s + 1, pageStart: start, pageEnd: end, sheets });
   }
 
-  return {
+  const result = {
     meta: {
       app: 'saddle-stitch-imposition',
-      version: '1.1.0',
+      version: '1.2.0',
       generatedAt: new Date().toISOString(),
     },
-    input: { totalPages, sheetsPerSignature, binding, flip, paperThickness, maxCompensation },
+    input: {
+      totalPages,
+      sheetsPerSignature,
+      binding,
+      flip,
+      paperThickness,
+      maxCompensation,
+      paperWidth: fit.paperWidth,
+      paperHeight: fit.paperHeight,
+      pageWidth: fit.pageWidth,
+      pageHeight: fit.pageHeight,
+      bleedMm: fit.bleedMm,
+      safetyMm: fit.safetyMm,
+    },
     pagesPerSignature,
     signatureCount,
     paddedPages,
@@ -187,6 +209,11 @@ function computeImposition(input) {
     },
     signatures,
   };
+
+  // 纸张规格与出血 / 安全区适配检查：逐页位计算并附加 slot.fit 与顶层 fit 汇总。
+  // 未提供纸张 / 成品页尺寸时 fit.enabled = false，页码拼版与爬移结果完全不受影响。
+  result.fit = attachFit(result, fit);
+  return result;
 }
 
 module.exports = { computeImposition };
